@@ -63,6 +63,7 @@ The script also handles cases where players have cleared the content, prioritizi
      ```
 
    - Ensure valid Tomestone links are provided for each participant.
+   - This website is recommended for filling in the 'discord' parameter https://hammertime.cyou/
 
 ---
 
