@@ -46,7 +46,7 @@ The script also handles cases where players have cleared the content, prioritizi
 
 ### Configuration
 
-1. **Modify `ladder.json`**:
+1. **Create/Modify `ladder.json`**:
 
    - Include the following fields for each participant:
 
