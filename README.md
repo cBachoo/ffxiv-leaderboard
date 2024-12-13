@@ -34,8 +34,8 @@ The script also handles cases where players have cleared the content, prioritizi
 1. Clone the repository:
 
    ```bash
-   git clone <repository-url>
-   cd <repository-directory>
+   git clone https://github.com/cBachoo/ffxiv-leaderboard.git
+   cd ffxiv-leaderboard
    ```
 
 2. Install the required Python packages:
