@@ -44,13 +44,15 @@ def write_leaderboard(cleared, non_cleared, file_path):
     try:
         with open(file_path, "w") as file:
             file.write("## FRU Progress leaderboard\n\n")
+            
+            # Cleared section
             file.write("# Cleared!\n")
-            for entry in cleared:
-                file.write(f"{entry['name']} - {entry['discord']}\n")
-
+            for idx, entry in enumerate(cleared, start=1):
+                file.write(f"{idx}. {entry['name']} - {entry['discord']}\n")
+            
             file.write("\n# Proggin'\n")
-            for entry in non_cleared:
-                file.write(f"{entry['name']} - {entry['status']}\n")
+            for idx, entry in enumerate(non_cleared, start=1):
+                file.write(f"{idx}. {entry['name']} - {entry['status']}\n")
 
         print(f"Leaderboard successfully written to {file_path}")
     except Exception as e:
