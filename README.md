@@ -63,6 +63,7 @@ The script also handles cases where players have cleared the content, prioritizi
      ```
 
    - Ensure valid Tomestone links are provided for each participant.
+   - This website is recommended for filling in the 'discord' parameter https://hammertime.cyou/
 
 ---
 
@@ -101,6 +102,6 @@ python fc.py
 
 - Ensure all dependencies (e.g., ChromeDriver) are correctly installed and paths configured.
 - Verify the JSON structure for any syntax errors.
-
+- 'outputs' folder must be created manually if script doesn't create it
 ---
 
