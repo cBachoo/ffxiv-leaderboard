@@ -43,7 +43,7 @@ def save_csv(data, file_path, fieldnames):
 def write_leaderboard(cleared, non_cleared, file_path):
     try:
         with open(file_path, "w") as file:
-            file.write("## FRU Progress leaderboard\n\n")
+            file.write("# FRU Progress leaderboard\n\n")
             
             # Cleared section
             file.write("# Cleared!\n")
