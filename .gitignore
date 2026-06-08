@@ -1,5 +1,6 @@
-leaderboard.txt
-output.csv
-sorted_output.csv
+__pycache__/
+outputs/
+
 ladder.json
 todo.md
+settings.local.json

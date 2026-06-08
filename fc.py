@@ -13,6 +13,7 @@ from selenium.common.exceptions import (
     StaleElementReferenceException,
 )
 from bs4 import BeautifulSoup
+from PIL import Image, ImageDraw, ImageFont
 import time
 from datetime import datetime
 
@@ -68,6 +69,207 @@ def write_leaderboard(cleared, non_cleared, file_path):
         print(f"Leaderboard successfully written to {file_path}")
     except Exception as e:
         print(f"Error writing leaderboard: {e}")
+
+
+# ---- Leaderboard image rendering -------------------------------------------
+
+# Gruvbox dark palette (https://github.com/morhetz/gruvbox).
+GB_BG = (40, 40, 40)        # #282828 bg0  - page background
+GB_FG = (235, 219, 178)     # #ebdbb2 fg   - primary text
+GB_GRAY = (146, 131, 116)   # #928374 gray - box borders / rank
+GB_YELLOW = (250, 189, 47)  # #fabd2f      - P1 / title
+GB_BLUE = (131, 165, 152)   # #83a598      - P2
+GB_GREEN = (184, 187, 38)   # #b8bb26      - P3
+GB_RED = (251, 73, 52)      # #fb4934      - P4
+GB_ORANGE = (254, 128, 25)  # #fe8019      - cleared
+GB_PURPLE = (211, 134, 155)  # #d3869b     - P5
+GB_AQUA = (142, 192, 124)   # #8ec07c      - header labels
+GB_ROW_ALT = (60, 56, 54)   # #3c3836 bg1  - alternating row shade
+GB_HEADER_BG = (50, 48, 47) # #32302f bg0s - header strip
+
+# Progress text colour by phase (higher phase == further along).
+PHASE_COLORS = {
+    1: GB_YELLOW,
+    2: GB_BLUE,
+    3: GB_GREEN,
+    4: GB_RED,
+    5: GB_PURPLE,
+}
+CLEARED_COLOR = GB_ORANGE
+
+
+def _load_mono_font(size):
+    """Load a monospace TrueType font (with box-drawing glyphs)."""
+    candidates = [
+        "MapleMono-NF-Regular.ttf", "C:/Windows/Fonts/MapleMono-NF-Regular.ttf",
+        "MapleMono-Regular.ttf", "MapleMonoNF-Regular.ttf",
+        "consola.ttf", "C:/Windows/Fonts/consola.ttf",
+        "DejaVuSansMono.ttf", "cour.ttf", "C:/Windows/Fonts/cour.ttf",
+    ]
+    for name in candidates:
+        try:
+            return ImageFont.truetype(name, size)
+        except (OSError, IOError):
+            continue
+    return ImageFont.load_default()
+
+
+def _progress_display(entry):
+    """Return (text, color) describing an entry's progress for the table."""
+    status = entry.get("status", "")
+    if status.lower() == "cleared":
+        return "CLEARED", CLEARED_COLOR
+    match = re.search(r"([\d.]+)%.*?P(\d+)", status)
+    if match:
+        percent, phase = match.group(1), int(match.group(2))
+        return f"P{phase} {percent}%", PHASE_COLORS.get(phase, GB_FG)
+    return status or "N/A", GB_GRAY
+
+
+def write_leaderboard_image(entries, file_path):
+    """Render the leaderboard as an ASCII box-drawing table (gruvbox).
+
+    Cleared players and progressing players are split into their own sections
+    -- mirroring leaderboard.txt -- each with its own column header and a rank
+    that restarts at 1.
+    """
+    try:
+        font = _load_mono_font(26)
+
+        # Monospace metrics: every glyph (including box-drawing) occupies a
+        # cell of char_w x line_h, so we can place text on a character grid.
+        scratch = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+        char_w = scratch.textlength("M", font=font)
+        ascent, descent = font.getmetrics()
+        line_h = ascent + descent
+
+        title = "DMU PROGRESS LEADERBOARD"
+
+        def pulls_of(entry):
+            p = entry.get("pulls", "N/A")
+            return "N/A" if p in ("", None) else str(p)
+
+        # Split into sections, each numbered from 1. A row is
+        # (rank, name, col3_text, col3_color, pulls).
+        cleared_entries = [e for e in entries if e.get("status", "").lower() == "cleared"]
+        proggin_entries = [e for e in entries if e.get("status", "").lower() != "cleared"]
+
+        cleared_rows = []
+        for i, e in enumerate(cleared_entries, start=1):
+            cleared_rows.append((str(i), e.get("name", ""),
+                                 e.get("date") or "—", CLEARED_COLOR, pulls_of(e)))
+
+        proggin_rows = []
+        for i, e in enumerate(proggin_entries, start=1):
+            text, color = _progress_display(e)
+            proggin_rows.append((str(i), e.get("name", ""), text, color, pulls_of(e)))
+
+        # (band label, label color, col-3 header, rows) -- skip empty sections.
+        sections = []
+        if cleared_rows:
+            sections.append(("CLEARED", CLEARED_COLOR, "Cleared", cleared_rows))
+        if proggin_rows:
+            sections.append(("PROGGIN'", GB_AQUA, "Progress", proggin_rows))
+
+        # Column content widths (in characters), across every section.
+        ncols = 4
+        cw = [len("#"), len("Name"), max(len("Progress"), len("Cleared")), len("Pulls")]
+        for _label, _lc, _h, sec_rows in sections:
+            for rank, name, c3, _c3color, pulls in sec_rows:
+                cw[0] = max(cw[0], len(rank))
+                cw[1] = max(cw[1], len(name))
+                cw[2] = max(cw[2], len(c3))
+                cw[3] = max(cw[3], len(pulls))
+
+        # Inner width spanned by a full-width (title / section band) row.
+        inner_w = sum(c + 2 for c in cw) + (ncols - 1)
+
+        def border(left, mid, right):
+            return left + mid.join("─" * (c + 2) for c in cw) + right
+
+        # Character column where each cell's content starts.
+        # Layout per columned row: "│" + (" " + content + " " + "│") * ncols.
+        content_start = []
+        ci = 1  # past the leading border
+        for c in range(ncols):
+            ci += 1  # left pad space
+            content_start.append(ci)
+            ci += cw[c] + 1 + 1  # content + right pad + border
+
+        def span_row(text, color):
+            """A full-width row with centered text (title / section band)."""
+            x = 1 + (inner_w - len(text)) // 2
+            return [(0, "│" + " " * inner_w + "│", GB_GRAY), (x, text, color)]
+
+        def cell_row(cells, colors):
+            """A bordered, columned row as colored segments."""
+            segs = [(0, border("│", "│", "│").replace("─", " "), GB_GRAY)]
+            for c in range(ncols):
+                segs.append((content_start[c], cells[c], colors[c]))
+            return segs
+
+        # Assemble lines, recording an optional background fill per line.
+        lines, backgrounds = [], []
+
+        def add(segments, bg=None):
+            lines.append(segments)
+            backgrounds.append(bg)
+
+        add([(0, "┌" + "─" * inner_w + "┐", GB_GRAY)])              # title top
+        add(span_row(title, GB_YELLOW))                            # title
+
+        col_header_colors = [GB_GRAY, GB_AQUA, GB_AQUA, GB_AQUA]
+        for si, (label, label_color, col3_header, sec_rows) in enumerate(sections):
+            # Separator above the section band. Above is a full-width row for
+            # the first section (title) and a columned data row otherwise.
+            add([(0, border("├", "─", "┤") if si == 0 else border("├", "┴", "┤"),
+                  GB_GRAY)])
+            add(span_row(label, label_color), GB_HEADER_BG)        # section band
+            add([(0, border("├", "┬", "┤"), GB_GRAY)])             # band -> cols
+            add(cell_row(["#", "Name", col3_header, "Pulls"],
+                         col_header_colors), GB_HEADER_BG)          # column header
+            add([(0, border("├", "┼", "┤"), GB_GRAY)])             # header sep
+            for i, (rank, name, c3, c3color, pulls) in enumerate(sec_rows):
+                add(cell_row([rank, name, c3, pulls],
+                             [GB_GRAY, GB_FG, c3color, GB_FG]),
+                    GB_ROW_ALT if i % 2 == 1 else None)             # data row
+
+        # Bottom border: columned if a section was rendered, else full-width.
+        if sections:
+            add([(0, border("└", "┴", "┘"), GB_GRAY)])
+        else:
+            add([(0, "└" + "─" * inner_w + "┘", GB_GRAY)])
+
+        # Image size from the character grid, with a small margin.
+        total_cols = inner_w + 2
+        margin_x = int(char_w * 2)
+        margin_y = line_h
+        img_w = int(total_cols * char_w) + margin_x * 2
+        img_h = line_h * len(lines) + margin_y * 2
+
+        img = Image.new("RGB", (img_w, img_h), GB_BG)
+        draw = ImageDraw.Draw(img)
+
+        # Shade row interiors (between the left/right borders) for the section
+        # bands, column headers, and alternating data rows.
+        inner_left = margin_x + int(1 * char_w)
+        inner_right = margin_x + int((total_cols - 1) * char_w)
+        for row_idx, bg in enumerate(backgrounds):
+            if bg is None:
+                continue
+            y = margin_y + row_idx * line_h
+            draw.rectangle([inner_left, y, inner_right, y + line_h], fill=bg)
+
+        for row_idx, segments in enumerate(lines):
+            y = margin_y + row_idx * line_h
+            for char_idx, text, color in segments:
+                x = margin_x + int(char_idx * char_w)
+                draw.text((x, y), text, font=font, fill=color, anchor="la")
+
+        img.save(file_path)
+        print(f"Leaderboard image successfully written to {file_path}")
+    except Exception as e:
+        print(f"Error writing leaderboard image: {e}")
 
 # Selenium functionality
 
@@ -314,6 +516,7 @@ def main():
     output_csv_path = "./outputs/output.csv"
     sorted_csv_path = "./outputs/sorted_output.csv"
     leaderboard_path = "./outputs/leaderboard.txt"
+    leaderboard_image_path = "./outputs/leaderboard.png"
 
     # Step 1: Load JSON
     data = load_json(json_file_path)
@@ -335,6 +538,9 @@ def main():
     non_cleared = [entry for entry in sorted_data if entry["status"] != "cleared"]
 
     write_leaderboard(cleared, non_cleared, leaderboard_path)
+
+    # Step 7: Generate leaderboard.png (styled ranked table)
+    write_leaderboard_image(sorted_data, leaderboard_image_path)
 
     print("All tasks completed successfully!")
 
